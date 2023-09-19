@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+import "fmt"
+
 func TestPAM_001(t *testing.T) {
 	u, _ := user.Current()
 	if u.Uid != "0" {
@@ -264,6 +266,46 @@ func TestPAM_ConfDir_PromptForUserName(t *testing.T) {
 	err = tx.Authenticate(0)
 	if err != nil {
 		t.Fatalf("authenticate #error: %v", err)
+	}
+}
+
+type MessageHandler struct {
+	infoText string
+	errorMsg string
+}
+
+func (m MessageHandler) RespondPAM(s Style, msg string) (string, error) {
+	fmt.Println("Got",s,"msg",msg)
+	switch s {
+	case TextInfo:
+		m.infoText = msg
+		return "", nil
+	case ErrorMsg:
+		m.errorMsg = msg
+		return "", nil
+	}
+	return "", errors.New("unexpected")
+}
+
+func (m MessageHandler) RespondPAMBinary(p BinaryPointer) ([]byte, error) {
+	fmt.Println("Got binary",p)
+	return nil, nil
+}
+
+func TestPAM_ConfDir_BinaryMessage(t *testing.T) {
+	u, _ := user.Current()
+	var infoText string
+	tx, err := StartConfDir("gdm-shell-test", u.Username,
+		BinaryConversationHandler(MessageHandler{}), "test-services")
+	if err != nil {
+		t.Fatalf("start #error: %v", err)
+	}
+	err = tx.Authenticate(0)
+	if err != nil {
+		t.Fatalf("authenticate #error: %v", err)
+	}
+	if infoText != "This is an info message for user " + u.Username + " on echo-service" {
+		t.Fatalf("Unexpected info message: %v", infoText)
 	}
 }
 
