@@ -223,7 +223,7 @@ func TestPAM_ConfDir_InfoMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticate #error: %v", err)
 	}
-	if infoText != "This is an info message" {
+	if infoText != "This is an info message for user " + u.Username + " on echo-service" {
 		t.Fatalf("Unexpected info message: %v", infoText)
 	}
 }
