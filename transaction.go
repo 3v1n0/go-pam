@@ -9,6 +9,14 @@ package pam
 //void init_pam_conv(struct pam_conv *conv, uintptr_t);
 //int pam_start_confdir(const char *service_name, const char *user, const struct pam_conv *pam_conversation, const char *confdir, pam_handle_t **pamh) __attribute__ ((weak));
 //int check_pam_start_confdir(void);
+//
+//#ifdef PAM_BINARY_PROMPT
+//#define BINARY_PROMPT_IS_SUPPORTED 1
+//#else
+//#include <limits.h>
+//#define PAM_BINARY_PROMPT INT_MAX
+//#define BINARY_PROMPT_IS_SUPPORTED 0
+//#endif
 import "C"
 
 import (
@@ -47,6 +55,20 @@ type ConversationHandler interface {
 	RespondPAM(Style, string) (string, error)
 }
 
+// BinaryPointer exposes the type used for the data in a binary conversation
+// it represents a pointer to data that is produced by the module and that
+// must be parsed depending on the protocol in use
+type BinaryPointer unsafe.Pointer
+
+type BinaryConversationHandler interface {
+	ConversationHandler
+	// Respond receives a pointer to the binary message. It's up to the
+	// receiver to parse it according to the protocol specifications.
+	// The function can return a byte array that will passed as pointer back
+	// to the module.
+	RespondPAMBinary(BinaryPointer) ([]byte, error)
+}
+
 // ConversationFunc is an adapter to allow the use of ordinary functions as
 // conversation callbacks.
 type ConversationFunc func(Style, string) (string, error)
@@ -64,7 +86,20 @@ func cbPAMConv(s C.int, msg *C.char, c C.uintptr_t) (*C.char, C.int) {
 	v := cgo.Handle(c).Value()
 	switch cb := v.(type) {
 	case ConversationHandler:
+		if s == C.PAM_BINARY_PROMPT {
+			return nil, C.PAM_AUTHINFO_UNAVAIL
+		}
 		r, err = cb.RespondPAM(Style(s), C.GoString(msg))
+	case BinaryConversationHandler:
+		if s == C.PAM_BINARY_PROMPT {
+			bytes, err := cb.RespondPAMBinary(BinaryPointer(msg))
+			if err != nil {
+				return nil, C.PAM_CONV_ERR
+			}
+			return (*C.char)(C.CBytes(bytes)), C.PAM_SUCCESS
+		} else {
+			r, err = cb.RespondPAM(Style(s), C.GoString(msg))
+		}
 	}
 	if err != nil {
 		return nil, C.PAM_CONV_ERR
@@ -117,6 +152,12 @@ func StartConfDir(service, user string, handler ConversationHandler, confDir str
 }
 
 func start(service, user string, handler ConversationHandler, confDir string) (*Transaction, error) {
+	switch handler.(type) {
+	case BinaryConversationHandler:
+		if C.BINARY_PROMPT_IS_SUPPORTED == 0 {
+			return nil, errors.New("BinaryConversationHandler() was used, but it is not supported by this platform")
+		}
+	}
 	t := &Transaction{
 		conv: &C.struct_pam_conv{},
 		c:    cgo.NewHandle(handler),
