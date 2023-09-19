@@ -34,6 +34,9 @@ const (
 	// TextInfo indicates the conversation handler should display some
 	// text.
 	TextInfo = C.PAM_TEXT_INFO
+	// Binary indicates the conversation handler that should implement
+	// the private binary protocol
+	Binary = C.PAM_BINARY_PROMPT
 )
 
 // ConversationHandler is an interface for objects that can be used as
