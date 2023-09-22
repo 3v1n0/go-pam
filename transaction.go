@@ -276,6 +276,11 @@ func (t *Transaction) Error() string {
 	return C.GoString(C.pam_strerror(t.handle, C.int(t.status)))
 }
 
+// Status exposes the ReturnType for the last operation
+func (t *Transaction) Status() ReturnType {
+	return ReturnType(t.status)
+}
+
 // Item is a an PAM information type.
 type Item int
 
