@@ -129,6 +129,11 @@ const (
 	BinaryPrompt = C.PAM_BINARY_PROMPT
 )
 
+// ModuleHandler is an interface for objects that can be used to create
+type ModuleHandler interface {
+	Authenticate(*Transaction, []string) (string, error)
+}
+
 // ConversationHandler is an interface for objects that can be used as
 // conversation callbacks during PAM authentication.
 type ConversationHandler interface {
@@ -233,7 +238,10 @@ func StartFunc(service, user string, handler func(Style, string) (string, error)
 // transaction provides an interface to the remainder of the API.
 func StartConfDir(service, user string, handler ConversationHandler, confDir string) (*Transaction, error) {
 	if !CheckPamHasStartConfdir() {
-		return nil, errors.New("StartConfDir() was used, but the pam version on the system is not recent enough")
+		return nil, &TransactionError{
+			errors.New("StartConfDir() was used, but the pam version on the system is not recent enough"),
+			SystemErr,
+		}
 	}
 
 	return start(service, user, handler, confDir)
@@ -243,7 +251,10 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 	switch handler.(type) {
 	case BinaryConversationHandler:
 		if !CheckPamHasBinaryProtocol() {
-			return nil, errors.New("BinaryConversationHandler() was used, but it is not supported by this platform")
+			return nil, &TransactionError{
+				errors.New("BinaryConversationHandler() was used, but it is not supported by this platform"),
+				SystemErr,
+			}
 		}
 	}
 	t := &Transaction{
@@ -267,9 +278,18 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 		t.status = C.pam_start_confdir(s, u, t.conv, c, &t.handle)
 	}
 	if t.status != Success {
-		return nil, t
+		return nil, &TransactionError{t, ReturnType(t.status)}
 	}
 	return t, nil
+}
+
+type TransactionError struct {
+	error
+	status ReturnType
+}
+
+func (e *TransactionError) Status() ReturnType {
+	return ReturnType(e.returnType)
 }
 
 func (t *Transaction) Error() string {
