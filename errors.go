@@ -5,6 +5,11 @@ package pam
 */
 import "C"
 
+import (
+	"errors"
+	"fmt"
+)
+
 // Error is the Type for PAM Return types
 type Error int
 
@@ -91,4 +96,42 @@ const (
 // Error returns the error message for the given status.
 func (status Error) Error() string {
 	return C.GoString(C.pam_strerror(nil, C.int(status)))
+}
+
+// Status returns the Status of the status, this is needed to make this type
+// to implement the TransactionError interface
+func (status Error) Status() Error {
+	return status
+}
+
+// TransactionError is an interface that is implemented by Transaction and that
+// may be implemented to provide a more detailed error to the PAM stack.
+type TransactionError interface {
+	error
+	Status() Error
+}
+
+// TransactionError extends error to provide more detailed information.
+type transactionError struct {
+	error
+}
+
+// NewTransactionError returns a new transaction error.
+func NewTransactionError(status Error, err error) TransactionError {
+	return &transactionError{errors.Join(err, status)}
+}
+
+// Status exposes the [pam.Error] for the error.
+func (e transactionError) Status() Error {
+	var status Error
+	if !errors.As(e.error, &status) {
+		panic(fmt.Sprintf("%#v is not a status error", e))
+	}
+	return status
+}
+
+// Unwrap gets the error status from the transactionError, allowing to do
+// comparisons and conversions to [pam.Error].
+func (e transactionError) Unwrap() error {
+	return e.Status()
 }

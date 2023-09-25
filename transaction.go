@@ -164,7 +164,8 @@ func StartFunc(service, user string, handler func(Style, string) (string, error)
 // transaction provides an interface to the remainder of the API.
 func StartConfDir(service, user string, handler ConversationHandler, confDir string) (*Transaction, error) {
 	if !CheckPamHasStartConfdir() {
-		return nil, errors.New("StartConfDir() was used, but the pam version on the system is not recent enough")
+		return nil, NewTransactionError(ErrSystem,
+			errors.New("StartConfDir was used, but the pam version on the system is not recent enough"))
 	}
 
 	return start(service, user, handler, confDir)
@@ -174,7 +175,8 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 	switch handler.(type) {
 	case BinaryConversationHandler:
 		if !CheckPamHasBinaryProtocol() {
-			return nil, errors.New("BinaryConversationHandler() was used, but it is not supported by this platform")
+			return nil, NewTransactionError(ErrSystem,
+				errors.New("BinaryConversationHandler was used, but it is not supported by this platform"))
 		}
 	}
 	t := &Transaction{
@@ -198,7 +200,7 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 		t.status = C.pam_start_confdir(s, u, t.conv, c, &t.handle)
 	}
 	if t.status != success {
-		return nil, t
+		return nil, Error(t.status)
 	}
 	return t, nil
 }
