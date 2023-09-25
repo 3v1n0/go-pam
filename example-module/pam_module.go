@@ -14,6 +14,7 @@ typedef const char _const_char_t;
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"github.com/msteinert/pam"
 	"os"
@@ -43,20 +44,18 @@ func handlePamCall(pamh *C.pam_handle_t, flags C.int, argc C.int,
 		return C.int(pam.ErrIgnore)
 	}
 
-	err := moduleFunc(pam.NewModuleTransaction(pam.NativeHandle(pamh)),
-		pam.Flags(flags), sliceFromArgv(argc, argv))
-
-	if err == nil {
-		return 0
-	}
-
-	if (pam.Flags(flags) & pam.Silent) == 0 {
-		fmt.Fprintf(os.Stderr, "module returned error: %v\n", err)
-	}
-
-	switch et := err.(type) {
-	case pam.TransactionError:
-		return C.int(et.Status())
+	mt := pam.NewModuleTransactionInvoker(pam.NativeHandle(pamh))
+	err := mt.InvokeHandler(moduleFunc, pam.Flags(flags),
+		sliceFromArgv(argc, argv))
+	if err != nil {
+		if (pam.Flags(flags)&pam.Silent) == 0 && !errors.Is(err, pam.ErrIgnore) {
+			fmt.Fprintf(os.Stderr, "module returned error: %v\n", err)
+		}
+		txErr, ok := err.(pam.TransactionError)
+		if !ok {
+			return C.int(pam.ErrSystem)
+		}
+		return C.int(txErr.Status())
 	}
 
 	return 0

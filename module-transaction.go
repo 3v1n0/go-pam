@@ -1,6 +1,13 @@
 // Package pam provides a wrapper for the PAM application API.
 package pam
 
+import "C"
+
+import (
+	"errors"
+	"fmt"
+)
+
 // ModuleTransaction is an interface that a pam module transaction
 // should implement.
 type ModuleTransaction interface {
@@ -30,8 +37,71 @@ type ModuleHandler interface {
 	SetCred(ModuleTransaction, Flags, []string) error
 }
 
-// NewModuleTransaction allows initializing a transaction invoker from
+// ModuleTransactionInvoker is an interface that a pam module transaction
+// should implement to redirect requests from C handlers to go,
+type ModuleTransactionInvoker interface {
+	ModuleTransaction
+	InvokeHandler(handler ModuleHandlerFunc, flags Flags, args []string) error
+}
+
+// NewModuleTransactionInvoker allows initializing a transaction invoker from
 // the module side.
-func NewModuleTransaction(handle NativeHandle) ModuleTransaction {
+func NewModuleTransactionInvoker(handle NativeHandle) ModuleTransactionInvoker {
 	return &moduleTransaction{transactionBase{handle: handle}}
+}
+
+func (m *moduleTransaction) InvokeHandler(handler ModuleHandlerFunc,
+	flags Flags, args []string) error {
+	invoker := func() TransactionError {
+		if handler == nil {
+			return ErrIgnore
+		}
+		err := handler(m, flags, args)
+		if err != nil {
+			service, _ := m.GetItem(Service)
+
+			var txErr TransactionError
+			var pamErr Error
+			if errors.As(err, &txErr) {
+				status := txErr.Status()
+				if status == ErrIgnore {
+					return status
+				}
+				if service == "" {
+					return txErr
+				}
+				return NewTransactionError(txErr.Status(),
+					errors.New(service+" failed: "+txErr.Error()))
+			}
+
+			if errors.As(err, &pamErr) {
+				if pamErr == ErrIgnore {
+					return pamErr
+				}
+				if service == "" {
+					return NewTransactionError(pamErr, nil)
+				}
+				return NewTransactionError(pamErr,
+					errors.New(service+" failed: "+pamErr.Error()))
+			}
+
+			if service == "" {
+				return NewTransactionError(ErrAbort,
+					fmt.Errorf("failure: %w", err))
+			}
+			return NewTransactionError(ErrAbort,
+				fmt.Errorf("%s failed: %w", service, err))
+		}
+		return nil
+	}
+	txErr := invoker()
+	if txErr != nil && txErr.Status() == Error(success) {
+		txErr = nil
+	}
+	var status int32
+	if txErr != nil {
+		status = int32(txErr.Status())
+	}
+	m.lastStatus.Store(status)
+	return txErr
 }
