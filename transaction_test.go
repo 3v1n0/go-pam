@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestPAM_001(t *testing.T) {
@@ -436,6 +438,23 @@ func TestEnv(t *testing.T) {
 	if m["VAL3"] != "3" {
 		t.Fatalf("getenvlist #error: expected 3, got %v", m["VAL1"])
 	}
+}
+
+func Test_Finalizer(t *testing.T) {
+	if !CheckPamHasStartConfdir() {
+		t.Skip("this requires PAM with Conf dir support")
+	}
+
+	func() {
+		_, err := StartConfDir("permit-service", "", nil, "test-services")
+		if err != nil {
+			t.Fatalf("start #error: %v", err)
+		}
+	}()
+
+	runtime.GC()
+	// sleep to switch to finalizer goroutine
+	time.Sleep(5 * time.Millisecond)
 }
 
 func Test_Status(t *testing.T) {
