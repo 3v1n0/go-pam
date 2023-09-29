@@ -237,6 +237,9 @@ func TestPAM_ConfDir(t *testing.T) {
 }
 
 func TestPAM_ConfDir_FailNoServiceOrUnsupported(t *testing.T) {
+	if !CheckPamHasStartConfdir() {
+		t.Skip("this requires PAM with Conf dir support")
+	}
 	u, _ := user.Current()
 	c := Credentials{
 		Password: "secret",
@@ -294,6 +297,9 @@ func TestPAM_ConfDir_InfoMessage(t *testing.T) {
 }
 
 func TestPAM_ConfDir_Deny(t *testing.T) {
+	if !CheckPamHasStartConfdir() {
+		t.Skip("this requires PAM with Conf dir support")
+	}
 	u, _ := user.Current()
 	tx, err := StartConfDir("deny-service", u.Username, Credentials{}, "test-services")
 	defer maybeEndTransaction(t, tx)
