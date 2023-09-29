@@ -18,7 +18,7 @@ func ensureNoError(t *testing.T, err error) {
 func ensureEqual(t *testing.T, a any, b any) {
 	t.Helper()
 	if !reflect.DeepEqual(a, b) {
-		t.Fatalf("values mismatch %v vs %v", a, b)
+		t.Fatalf("values mismatch %#v vs %#v", a, b)
 	}
 }
 
