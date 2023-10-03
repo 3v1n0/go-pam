@@ -1,8 +1,15 @@
 // Package utils contains the internal test utils
 package utils
 
+//#include <stdint.h>
+import "C"
+
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
+	"reflect"
+	"unsafe"
 
 	"github.com/msteinert/pam"
 )
@@ -117,6 +124,10 @@ func (e *SerializableError) Error() string {
 type Credentials struct {
 	User              string
 	Password          string
+	EchoOn            string
+	EchoOff           string
+	TextInfo          string
+	ErrorMsg          string
 	ExpectedMessage   string
 	CheckEmptyMessage bool
 	ExpectedStyle     pam.Style
@@ -144,11 +155,108 @@ func (c Credentials) RespondPAM(s pam.Style, msg string) (string, error) {
 
 	switch s {
 	case pam.PromptEchoOn:
-		return c.User, nil
+		if c.User != "" {
+			return c.User, nil
+		}
+		return c.EchoOn, nil
 	case pam.PromptEchoOff:
-		return c.Password, nil
+		if c.Password != "" {
+			return c.Password, nil
+		}
+		return c.EchoOff, nil
+	case pam.TextInfo:
+		return c.TextInfo, nil
+	case pam.ErrorMsg:
+		return c.ErrorMsg, nil
 	}
 
 	return "", pam.NewTransactionError(pam.ErrConv,
 		&SerializableError{fmt.Sprintf("unhandled style: %v", s)})
+}
+
+// BinaryTransaction represents a binary PAM transaction handler struct.
+type BinaryTransaction struct {
+	data         []byte
+	ExpectedNull bool
+	ReturnedData []byte
+}
+
+// TestBinaryDataEncoder encodes a test binary data.
+func TestBinaryDataEncoder(bytes []byte) []byte {
+	if len(bytes) > 0xff {
+		panic("Binary transaction size not supported")
+	}
+
+	if bytes == nil {
+		return bytes
+	}
+
+	data := make([]byte, 0, len(bytes)+1)
+	data = append(data, byte(len(bytes)))
+	data = append(data, bytes...)
+	return data
+}
+
+// TestBinaryDataDecoder decodes a test binary data.
+func TestBinaryDataDecoder(ptr pam.BinaryPointer) ([]byte, error) {
+	if ptr == nil {
+		return nil, nil
+	}
+
+	length := uint8(*((*C.uint8_t)(ptr)))
+	if length == 0 {
+		return []byte{}, nil
+	}
+	return C.GoBytes(unsafe.Pointer(ptr), C.int(length+1))[1:], nil
+}
+
+// NewBinaryTransactionWithData creates a new [pam.BinaryTransaction] from bytes.
+func NewBinaryTransactionWithData(data []byte, retData []byte) BinaryTransaction {
+	t := BinaryTransaction{ReturnedData: retData}
+	t.data = TestBinaryDataEncoder(data)
+	t.ExpectedNull = data == nil
+	return t
+}
+
+// NewBinaryTransactionWithRandomData creates a new [pam.BinaryTransaction] with random data.
+func NewBinaryTransactionWithRandomData(size uint8, retData []byte) BinaryTransaction {
+	t := BinaryTransaction{ReturnedData: retData}
+	randomData := make([]byte, size)
+	if err := binary.Read(rand.Reader, binary.LittleEndian, &randomData); err != nil {
+		panic(err)
+	}
+
+	t.data = TestBinaryDataEncoder(randomData)
+	return t
+}
+
+// Data returns the bytes of the transaction.
+func (b BinaryTransaction) Data() []byte {
+	return b.data
+}
+
+// RespondPAM (not) handles the PAM string conversations.
+func (b BinaryTransaction) RespondPAM(s pam.Style, msg string) (string, error) {
+	return "", pam.NewTransactionError(pam.ErrConv,
+		&SerializableError{"unexpected non-binary request"})
+}
+
+// RespondPAMBinary handles the PAM binary conversations.
+func (b BinaryTransaction) RespondPAMBinary(ptr pam.BinaryPointer) ([]byte, error) {
+	if ptr == nil && !b.ExpectedNull {
+		return nil, pam.NewTransactionError(pam.ErrConv,
+			&SerializableError{"unexpected null binary data"})
+	} else if ptr == nil {
+		return TestBinaryDataEncoder(b.ReturnedData), nil
+	}
+
+	bytes, _ := TestBinaryDataDecoder(ptr)
+	if !reflect.DeepEqual(bytes, b.data[1:]) {
+		return nil, pam.NewTransactionError(pam.ErrConv,
+			&SerializableError{
+				fmt.Sprintf("data mismatch %#v vs %#v", bytes, b.data[1:]),
+			})
+	}
+
+	return TestBinaryDataEncoder(b.ReturnedData), nil
 }

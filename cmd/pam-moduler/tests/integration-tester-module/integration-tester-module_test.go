@@ -72,6 +72,21 @@ func ensureEnv(tx *pam.Transaction, variable string, expected string) error {
 	return nil
 }
 
+func (r *Request) toBytes(t *testing.T) []byte {
+	t.Helper()
+	bytes, err := r.GOB()
+	if err != nil {
+		t.Fatalf("error: %v", err)
+		return nil
+	}
+	return bytes
+}
+
+func (r *Request) toTransactionData(t *testing.T) []byte {
+	t.Helper()
+	return utils.TestBinaryDataEncoder(r.toBytes(t))
+}
+
 func Test_Moduler_IntegrationTesterModule(t *testing.T) {
 	t.Parallel()
 	if !pam.CheckPamHasStartConfdir() {
@@ -545,6 +560,380 @@ func Test_Moduler_IntegrationTesterModule(t *testing.T) {
 				return ensureUser(tx, "setup-user")
 			},
 		},
+		"get-data-not-available": {
+			expectedError: pam.ErrNoModuleData,
+			checkedRequests: []checkedRequest{{
+				r:   NewRequest("GetData", "some-data"),
+				exp: []interface{}{nil, pam.ErrNoModuleData},
+			}},
+		},
+		"set-data-empty-nil": {
+			expectedError: pam.ErrNoModuleData,
+			checkedRequests: []checkedRequest{
+				{
+					r:   NewRequest("SetData", "", nil),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", ""),
+					exp: []interface{}{nil, pam.ErrNoModuleData},
+				},
+			},
+		},
+		"set-data-empty-to-value": {
+			checkedRequests: []checkedRequest{
+				{
+					r:   NewRequest("SetData", "", []string{"hello", "world"}),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", ""),
+					exp: []interface{}{[]string{"hello", "world"}, nil},
+				},
+			},
+		},
+		"set-data-to-value": {
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("SetData", "some-error-data",
+						utils.SerializableError{Msg: "An error"}),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", "some-error-data"),
+					exp: []interface{}{utils.SerializableError{Msg: "An error"}, nil},
+				},
+			},
+		},
+		"set-data-to-value-replacing": {
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("SetData", "some-data",
+						utils.SerializableError{Msg: "An error"}),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", "some-data"),
+					exp: []interface{}{utils.SerializableError{Msg: "An error"}, nil},
+				},
+				{
+					r:   NewRequest("SetData", "some-data", "Hello"),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", "some-data"),
+					exp: []interface{}{"Hello", nil},
+				},
+			},
+		},
+		"set-data-to-value-unset": {
+			expectedError: pam.ErrNoModuleData,
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("SetData", "some-data",
+						utils.SerializableError{Msg: "An error"}),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", "some-data"),
+					exp: []interface{}{utils.SerializableError{Msg: "An error"}, nil},
+				},
+				{
+					r:   NewRequest("SetData", "some-data", nil),
+					exp: []interface{}{nil},
+				},
+				{
+					r:   NewRequest("GetData", "some-data"),
+					exp: []interface{}{nil, pam.ErrNoModuleData},
+				},
+			},
+		},
+		"start-conv-no-conv-set": {
+			expectedError: pam.ErrConv,
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.TextInfo,
+						"hello PAM!",
+					}),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+				{
+					r:   NewRequest("StartStringConv", pam.TextInfo, "hello PAM!"),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+			},
+		},
+		"start-conv-prompt-text-info": {
+			credentials: utils.Credentials{
+				ExpectedMessage: "hello PAM!",
+				ExpectedStyle:   pam.TextInfo,
+				TextInfo:        "nice to see you, Go!",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.TextInfo,
+						"hello PAM!",
+					}),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.TextInfo,
+						"nice to see you, Go!",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.TextInfo, "hello PAM!"),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.TextInfo,
+						"nice to see you, Go!",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConvf", pam.TextInfo, "hello %s!", "PAM"),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.TextInfo,
+						"nice to see you, Go!",
+					}, nil},
+				},
+			},
+		},
+		"start-conv-prompt-error-msg": {
+			credentials: utils.Credentials{
+				ExpectedMessage: "This is wrong, PAM!",
+				ExpectedStyle:   pam.ErrorMsg,
+				ErrorMsg:        "ops, sorry...",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.ErrorMsg,
+						"This is wrong, PAM!",
+					}),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.ErrorMsg,
+						"ops, sorry...",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.ErrorMsg,
+						"This is wrong, PAM!",
+					),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.ErrorMsg,
+						"ops, sorry...",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConvf", pam.ErrorMsg,
+						"This is wrong, %s!", "PAM",
+					),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.ErrorMsg,
+						"ops, sorry...",
+					}, nil},
+				},
+			},
+		},
+		"start-conv-prompt-echo-on": {
+			credentials: utils.Credentials{
+				ExpectedMessage: "Give me your non-private infos",
+				ExpectedStyle:   pam.PromptEchoOn,
+				EchoOn:          "here's my public data",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.PromptEchoOn,
+						"Give me your non-private infos",
+					}),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.PromptEchoOn,
+						"here's my public data",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.PromptEchoOn,
+						"Give me your non-private infos",
+					),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.PromptEchoOn,
+						"here's my public data",
+					}, nil},
+				},
+			},
+		},
+		"start-conv-prompt-echo-off": {
+			credentials: utils.Credentials{
+				ExpectedMessage: "Give me your super-secret data",
+				ExpectedStyle:   pam.PromptEchoOff,
+				EchoOff:         "here's my private token",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.PromptEchoOff,
+						"Give me your super-secret data",
+					}),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.PromptEchoOff,
+						"here's my private token",
+					}, nil},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.PromptEchoOff,
+						"Give me your super-secret data",
+					),
+					exp: []interface{}{SerializableStringConvResponse{
+						pam.PromptEchoOff,
+						"here's my private token",
+					}, nil},
+				},
+			},
+		},
+		"start-conv-text-info-handle-failure-message-mismatch": {
+			expectedError: pam.ErrConv,
+			credentials: utils.Credentials{
+				ExpectedMessage: "This is an info message",
+				ExpectedStyle:   pam.TextInfo,
+				TextInfo:        "And this is what is returned",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.TextInfo,
+						"This should have been an info message, but is not",
+					}),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.TextInfo,
+						"This should have been an info message, but is not",
+					),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+			},
+		},
+		"start-conv-text-info-handle-failure-style-mismatch": {
+			expectedError: pam.ErrConv,
+			credentials: utils.Credentials{
+				ExpectedMessage: "This is an info message",
+				ExpectedStyle:   pam.PromptEchoOff,
+				TextInfo:        "And this is what is returned",
+			},
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableStringConvRequest{
+						pam.TextInfo,
+						"This is an info message",
+					}),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+				{
+					r: NewRequest("StartStringConv", pam.TextInfo,
+						"This is an info message",
+					),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+			},
+		},
+		"start-conv-binary": {
+			credentials: utils.NewBinaryTransactionWithData([]byte(
+				"\x00This is a binary data request\xC5\x00\xffYes it is!"),
+				[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99}),
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableBinaryConvRequest{
+						utils.TestBinaryDataEncoder(
+							[]byte("\x00This is a binary data request\xC5\x00\xffYes it is!")),
+					}),
+					exp: []interface{}{SerializableBinaryConvResponse{
+						[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99},
+					}, nil},
+				},
+				{
+					r: NewRequest("StartBinaryConv",
+						utils.TestBinaryDataEncoder(
+							[]byte("\x00This is a binary data request\xC5\x00\xffYes it is!"))),
+					exp: []interface{}{SerializableBinaryConvResponse{
+						[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99},
+					}, nil},
+				},
+			},
+		},
+		"start-conv-binary-handle-failure-passed-data-mismatch": {
+			expectedError: pam.ErrConv,
+			credentials: utils.NewBinaryTransactionWithData([]byte(
+				"\x00This is a binary data request\xC5\x00\xffYes it is!"),
+				[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99}),
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableBinaryConvRequest{
+						(&Request{"Not the expected binary data", nil}).toTransactionData(t),
+					}),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+				{
+					r: NewRequest("StartBinaryConv",
+						(&Request{"Not the expected binary data", nil}).toTransactionData(t)),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+			},
+		},
+		"start-conv-binary-handle-failure-returned-data-mismatch": {
+			expectedError: pam.ErrConv,
+			credentials: utils.NewBinaryTransactionWithRandomData(100,
+				[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99}),
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableBinaryConvRequest{
+						(&Request{"Wrong binary data", nil}).toTransactionData(t),
+					}),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+				{
+					r: NewRequest("StartBinaryConv",
+						(&Request{"Wrong binary data", nil}).toTransactionData(t)),
+					exp: []interface{}{nil, pam.ErrConv},
+				},
+			},
+		},
+		"start-conv-binary-in-nil": {
+			credentials: utils.NewBinaryTransactionWithData(nil,
+				(&Request{"Binary data", []interface{}{true, 123, 0.5, "yay!"}}).toBytes(t)),
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableBinaryConvRequest{}),
+					exp: []interface{}{SerializableBinaryConvResponse{
+						(&Request{"Binary data", []interface{}{true, 123, 0.5, "yay!"}}).toBytes(t),
+					}, nil},
+				},
+				{
+					r: NewRequest("StartBinaryConv", nil),
+					exp: []interface{}{SerializableBinaryConvResponse{
+						(&Request{"Binary data", []interface{}{true, 123, 0.5, "yay!"}}).toBytes(t),
+					}, nil},
+				},
+			},
+		},
+		"start-conv-binary-out-nil": {
+			credentials: utils.NewBinaryTransactionWithData([]byte(
+				"\x00This is a binary data request\xC5\x00\xffGimme nil!"), nil),
+			checkedRequests: []checkedRequest{
+				{
+					r: NewRequest("StartConv", SerializableBinaryConvRequest{
+						utils.TestBinaryDataEncoder(
+							[]byte("\x00This is a binary data request\xC5\x00\xffGimme nil!")),
+					}),
+					exp: []interface{}{SerializableBinaryConvResponse{}, nil},
+				},
+				{
+					r: NewRequest("StartBinaryConv",
+						utils.TestBinaryDataEncoder(
+							[]byte("\x00This is a binary data request\xC5\x00\xffGimme nil!"))),
+					exp: []interface{}{SerializableBinaryConvResponse{}, nil},
+				},
+			},
+		},
 	}
 
 	for name, tc := range tests {
@@ -557,6 +946,13 @@ func Test_Moduler_IntegrationTesterModule(t *testing.T) {
 				{Action: utils.Auth, Control: utils.Requisite, Module: modulePath,
 					Args: []string{socketPath}},
 			})
+
+			switch tc.credentials.(type) {
+			case pam.BinaryConversationHandler:
+				if !pam.CheckPamHasBinaryProtocol() {
+					t.Skip("Binary protocol is not supported")
+				}
+			}
 
 			tx, err := pam.StartConfDir(name, tc.user, tc.credentials, ts.WorkDir())
 			if err != nil {
@@ -776,6 +1172,50 @@ func Test_Moduler_IntegrationTesterModule_Authenticate(t *testing.T) {
 					exp: []interface{}{pam.ErrAbort},
 				},
 			},
+		},
+		"SetData-nil": {
+			expectedError: pam.ErrSystem,
+			checkedRequests: []checkedRequest{
+				{
+					r:   NewRequest("SetData", "some-data", nil),
+					exp: []interface{}{pam.ErrSystem},
+				},
+			},
+		},
+		"SetData": {
+			expectedError: pam.ErrSystem,
+			checkedRequests: []checkedRequest{
+				{
+					r:   NewRequest("SetData", "some-data", true),
+					exp: []interface{}{pam.ErrSystem},
+				},
+			},
+		},
+		"StartConv": {
+			expectedError: pam.ErrSystem,
+			checkedRequests: []checkedRequest{{
+				r: NewRequest("StartConv", SerializableStringConvRequest{
+					pam.TextInfo,
+					"hello PAM!",
+				}),
+				exp: []interface{}{nil, pam.ErrSystem},
+			}},
+		},
+		"StartStringConv": {
+			expectedError: pam.ErrSystem,
+			checkedRequests: []checkedRequest{{
+				r:   NewRequest("StartStringConv", pam.TextInfo, "hello PAM!"),
+				exp: []interface{}{nil, pam.ErrSystem},
+			}},
+		},
+		"StartConv-Binary": {
+			expectedError: pam.ErrSystem,
+			checkedRequests: []checkedRequest{{
+				r: NewRequest("StartConv", SerializableBinaryConvRequest{
+					[]byte{0x01, 0x02, 0x03, 0x05, 0x00, 0x99},
+				}),
+				exp: []interface{}{nil, pam.ErrSystem},
+			}},
 		},
 	}
 
