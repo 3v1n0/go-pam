@@ -104,8 +104,8 @@ func (status Error) Status() Error {
 	return status
 }
 
-// TransactionError is an interface that is implemented by Transaction and that
-// may be implemented to provide a more detailed error to the PAM stack.
+// TransactionError is an interface that may be implemented to provide a more
+// detailed error to the PAM stack.
 type TransactionError interface {
 	error
 	Status() Error
