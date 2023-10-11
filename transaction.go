@@ -23,6 +23,7 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"runtime/cgo"
 	"strings"
 	"sync/atomic"
@@ -173,7 +174,7 @@ func Start(service, user string, handler ConversationHandler) (*Transaction, err
 // StartFunc registers the handler func as a conversation handler and starts
 // the transaction (see Start() documentation).
 func StartFunc(service, user string, handler func(Style, string) (string, error)) (*Transaction, error) {
-	return Start(service, user, ConversationFunc(handler))
+	return start(service, user, ConversationFunc(handler), "")
 }
 
 // StartConfDir initiates a new PAM transaction. Service is treated identically to
@@ -200,6 +201,12 @@ func StartConfDir(service, user string, handler ConversationHandler, confDir str
 	return start(service, user, handler, confDir)
 }
 
+type panicHandlerFunc func(any)
+
+var defaultPanicHandler = func(v any) { panic(v) }
+
+var panicHandler panicHandlerFunc = defaultPanicHandler
+
 func start(service, user string, handler ConversationHandler, confDir string) (*Transaction, error) {
 	switch handler.(type) {
 	case BinaryConversationHandler:
@@ -212,6 +219,34 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 		conv: &C.struct_pam_conv{},
 		c:    cgo.NewHandle(handler),
 	}
+
+	callers := make([]uintptr, 10)
+	haveCallerInfo := runtime.Callers(2, callers) > 0
+	runtime.SetFinalizer(t, func(t *Transaction) {
+		handle := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&t.handle)))
+		if handle == nil {
+			return
+		}
+		if !haveCallerInfo {
+			panicHandler(fmt.Sprintf("Transaction %p was never ended", t))
+			return
+		}
+
+		stackTrace := make([]string, 0, len(callers))
+		for range callers {
+			frame, more := runtime.CallersFrames(callers).Next()
+			stackTrace = append(stackTrace, fmt.Sprintf("%s:%d",
+				frame.File, frame.Line))
+			if !more {
+				break
+			}
+			callers = callers[1:]
+		}
+		panicHandler(fmt.Sprintf("Transaction %p was never ended. "+
+			"Initialization was at:\n %s",
+			t, strings.Join(stackTrace, "\n ")))
+	})
+
 	C.init_pam_conv(t.conv, C.uintptr_t(t.c))
 	s := C.CString(service)
 	defer C.free(unsafe.Pointer(s))

@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func maybeEndTransaction(t *testing.T, tx *Transaction) {
@@ -555,6 +558,74 @@ func Test_Error(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func Test_Finalizer(t *testing.T) {
+	if !CheckPamHasStartConfdir() {
+		t.Skip("this requires PAM with Conf dir support")
+	}
+
+	func() {
+		tx, err := StartConfDir("permit-service", "", nil, "test-services")
+		defer maybeEndTransaction(t, tx)
+		if err != nil {
+			t.Fatalf("start #error: %v", err)
+		}
+	}()
+
+	runtime.GC()
+	// sleep to switch to finalizer goroutine
+	time.Sleep(5 * time.Millisecond)
+}
+
+func Test_FinalizerNotCleanedUp(t *testing.T) {
+	if !CheckPamHasStartConfdir() {
+		t.Skip("this requires PAM with Conf dir support")
+	}
+
+	panicChan := make(chan any)
+	panicHandler = func(v any) { panicChan <- v }
+	go func() { time.Sleep(time.Second * 2); panicChan <- errors.New("<timeout>") }()
+
+	func() {
+		_, err := StartConfDir("permit-service", "", nil, "test-services")
+		if err != nil {
+			t.Fatalf("start #error: %v", err)
+		}
+	}()
+
+	runtime.GC()
+
+	panicMsg, ok := (<-panicChan).(string)
+	if !ok {
+		t.Fatalf("unexpected type for %#v", panicMsg)
+	}
+	panicHandler = defaultPanicHandler
+
+	match, err := regexp.MatchString(
+		"Transaction 0x[0-9a-f]+ was never ended", panicMsg)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if !match {
+		t.Fatalf("no match in result:\n%s", panicMsg)
+	}
+	match, err = regexp.MatchString(
+		"transaction.go:[0-9]+", panicMsg)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if !match {
+		t.Fatalf("no match in result:\n%s", panicMsg)
+	}
+	match, err = regexp.MatchString(
+		"transaction_test.go:[0-9]+", panicMsg)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if !match {
+		t.Fatalf("no match in result:\n%s", panicMsg)
 	}
 }
 
