@@ -145,8 +145,8 @@ func transactionFinalizer(t *Transaction) {
 // Allows to call pam functions managing return status
 func (t *Transaction) handlePamStatus(cStatus C.int) error {
 	t.lastStatus.Store(int32(cStatus))
-	if cStatus != success {
-		return t
+	if status := Error(cStatus); status != success {
+		return status
 	}
 	return nil
 }
@@ -211,7 +211,7 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 		err = t.handlePamStatus(C.pam_start_confdir(s, u, t.conv, c, &t.handle))
 	}
 	if err != nil {
-		return nil, NewTransactionError(Error(t.lastStatus.Load()), err)
+		return nil, err
 	}
 	return t, nil
 }
@@ -363,7 +363,7 @@ func (t *Transaction) GetEnvList() (map[string]string, error) {
 	p := C.pam_getenvlist(t.handle)
 	if p == nil {
 		t.lastStatus.Store(int32(ErrBuf))
-		return nil, t
+		return nil, ErrBuf
 	}
 	t.lastStatus.Store(success)
 	for q := p; *q != nil; q = next(q) {
