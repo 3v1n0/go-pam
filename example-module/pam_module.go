@@ -45,8 +45,7 @@ func handlePamCall(pamh *C.pam_handle_t, flags C.int, argc C.int,
 	}
 
 	mt := pam.NewModuleTransactionInvoker(pam.NativeHandle(pamh))
-	err := mt.InvokeHandler(moduleFunc, pam.Flags(flags),
-		sliceFromArgv(argc, argv))
+	err := mt.InvokeHandler(moduleFunc, pam.Flags(flags), sliceFromArgv(argc, argv))
 	if err != nil {
 		if (pam.Flags(flags)&pam.Silent) == 0 && !errors.Is(err, pam.ErrIgnore) {
 			fmt.Fprintf(os.Stderr, "module returned error: %v\n", err)
