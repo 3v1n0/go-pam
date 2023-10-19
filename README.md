@@ -141,5 +141,8 @@ Then execute the tests:
 $ sudo GOPATH=$GOPATH $(which go) test -v
 ```
 
+Other tests can instead run as user without any setup with
+normal `go test ./...`
+
 [1]: http://godoc.org/github.com/msteinert/pam
 [2]: http://www.linux-pam.org/Linux-PAM-html/Linux-PAM_ADG.html
