@@ -13,13 +13,32 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     - name: Install PAM
-      run: sudo apt install -y libpam-dev
+      run: |
+        sudo apt update -y
+        sudo apt install -y libpam-dev
+    - name: Install Debug symbols
+      run: |
+        sudo apt install -y ubuntu-dev-tools
+        (cd /tmp && pull-lp-ddebs libpam0g $(lsb_release -c -s))
+        (cd /tmp && pull-lp-ddebs libpam-modules $(lsb_release -c -s))
+        sudo dpkg -i /tmp/libpam*-dbgsym_*.ddeb
     - name: Add a test user
       run: sudo useradd -d /tmp/test -p '$1$Qd8H95T5$RYSZQeoFbEB.gS19zS99A0' -s /bin/false test
     - name: Checkout code
       uses: actions/checkout@v4
     - name: Test
       run: sudo go test -v ./...
+    - name: Test with Address Sanitizer
+      env:
+        GO_PAM_TEST_WITH_ASAN: true
+        CGO_CFLAGS: "-O0 -g3 -fno-omit-frame-pointer"
+      run: |
+        # Do not run sudo-requiring go tests because as PAM has some leaks in 22.04
+        go test -v -asan -gcflags=all="-N -l"
+
+        # Run the rest of tests normally
+        sudo go test -v -asan -gcflags=all="-N -l" -run Module
+        sudo go test -C cmd -v -asan -gcflags=all="-N -l" ./...
     - name: Generate example module
       run: |
         go generate -C example-module -v
