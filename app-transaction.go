@@ -37,6 +37,18 @@ type BinaryConversationHandler interface {
 	RespondPAMBinary(BinaryPointer) ([]byte, error)
 }
 
+// BinaryPointerConversationHandler is an interface for objects that can be used as
+// conversation callbacks during PAM authentication if binary protocol is going
+// to be supported.
+type BinaryPointerConversationHandler interface {
+	ConversationHandler
+	// RespondPAMBinary receives a pointer to the binary message. It's up to
+	// the receiver to parse it according to the protocol specifications.
+	// The function must return a pointer that is allocated via malloc or
+	// similar, as it's expected to be free'd by the conversation handler.
+	RespondPAMBinary(BinaryPointer) (BinaryPointer, error)
+}
+
 // ConversationFunc is an adapter to allow the use of ordinary functions as
 // conversation callbacks.
 type ConversationFunc func(Style, string) (string, error)
@@ -57,6 +69,20 @@ func (f BinaryConversationFunc) RespondPAMBinary(ptr BinaryPointer) ([]byte, err
 
 // RespondPAM is a dummy conversation callback adapter.
 func (f BinaryConversationFunc) RespondPAM(Style, string) (string, error) {
+	return "", ErrConv
+}
+
+// BinaryPointerConversationFunc is an adapter to allow the use of ordinary
+// functions as binary pointer (only) conversation callbacks.
+type BinaryPointerConversationFunc func(BinaryPointer) (BinaryPointer, error)
+
+// RespondPAMBinary is a conversation callback adapter.
+func (f BinaryPointerConversationFunc) RespondPAMBinary(ptr BinaryPointer) (BinaryPointer, error) {
+	return f(ptr)
+}
+
+// RespondPAM is a dummy conversation callback adapter.
+func (f BinaryPointerConversationFunc) RespondPAM(Style, string) (string, error) {
 	return "", ErrConv
 }
 
@@ -88,6 +114,15 @@ func pamConvHandler(style Style, msg *C.char, handler ConversationHandler) (*C.c
 				return nil, success
 			}
 			return (*C.char)(C.CBytes(bytes)), success
+		}
+		handler = cb
+	case BinaryPointerConversationHandler:
+		if style == BinaryPrompt {
+			ptr, err := cb.RespondPAMBinary(BinaryPointer(msg))
+			if err != nil {
+				return nil, C.int(ErrConv)
+			}
+			return (*C.char)(ptr), success
 		}
 		handler = cb
 	case ConversationHandler:
@@ -170,6 +205,12 @@ func start(service, user string, handler ConversationHandler, confDir string) (*
 	case BinaryConversationHandler:
 		if !CheckPamHasBinaryProtocol() {
 			return nil, fmt.Errorf("%w: BinaryConversationHandler was used, but it is not supported by this platform",
+				ErrSystem)
+		}
+	case BinaryPointerConversationHandler:
+		if !CheckPamHasBinaryProtocol() {
+			return nil, fmt.Errorf(
+				"%w: BinaryPointerConversationHandler was used, but it is not supported by this platform",
 				ErrSystem)
 		}
 	}
