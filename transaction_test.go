@@ -646,7 +646,7 @@ func Test_FinalizerNotCleanedUp(t *testing.T) {
 		t.Fatalf("no match in result:\n%s", panicMsg)
 	}
 	match, err = regexp.MatchString(
-		"transaction.go:[0-9]+", panicMsg)
+		"app-transaction.go:[0-9]+", panicMsg)
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}

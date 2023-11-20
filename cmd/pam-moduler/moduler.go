@@ -119,7 +119,7 @@ func main() {
 		tags = strings.Split(*buildTags, ",")
 	}
 
-	generateTags := []string{"asPamModule"}
+	generateTags := []string{"go_pam_module"}
 	if len(*moduleBuildTags) > 0 {
 		generateTags = append(generateTags, strings.Split(*moduleBuildTags, ",")...)
 	}
