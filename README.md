@@ -32,6 +32,7 @@ PAM application has `fork`'ed.
 To do this, we can use a very simple wrapper written in C:
 
 ```c
+#include <string.h>
 #include <dlfcn.h>
 #include <limits.h>
 #include <security/pam_modules.h>
